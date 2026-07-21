@@ -35,6 +35,7 @@
   h1{font-family:'Fredoka';font-size:26px;color:var(--azul);margin:6px 0 12px;line-height:1.1}
   .numero-grande{font-family:'Fredoka';font-size:72px;color:var(--azul);line-height:1;margin:10px 0}
   .estado-box{font-weight:700;color:var(--azul);background:#F1F5F9;padding:14px;border-radius:14px;min-height:50px;display:flex;flex-direction:column;align-items:center;justify-content:center;margin-top:14px;gap:4px}
+  .input-manual{width:100%;padding:14px;border:2px solid #cbd5e1;border-radius:12px;font-size:24px;font-family:'Fredoka';text-align:center;color:var(--azul);margin:12px 0}
   .btn{width:100%;padding:16px;border:none;border-radius:14px;font-weight:800;font-size:16px;cursor:pointer;margin-top:12px}
   .btn-azul{background:var(--azul);color:white}
 </style>
@@ -42,14 +43,25 @@
 <body>
 <div class="contenedor" id="contenedor-principal">
   <div class="brand">PIZZAS <span>1</span> • RETIRO</div>
-  <h1 id="titulo">Validando...</h1>
-  <div id="numero-view" style="display:none"><div style="color:#888;font-size:12px;letter-spacing:1px">TU TURNO ES</div><div id="num-txt" class="numero-grande">#0</div></div>
-  <div id="estado-pantalla" class="estado-box">Cargando...</div>
-  <div id="error-box"></div>
+  <h1 id="titulo">Ingresa tu Turno</h1>
+  
+  <div id="vista-ingreso">
+    <p style="color:#666;font-size:14px;margin-bottom:10px">Escribe el número de pedido que te dieron en caja:</p>
+    <input type="number" id="input-turno" class="input-manual" placeholder="Ej: 5" pattern="[0-9]*">
+    <button class="btn btn-azul" onclick="vincularTurnoManual()">Ver Estado de mi Pedido</button>
+  </div>
+
+  <div id="numero-view" style="display:none">
+    <div style="color:#888;font-size:12px;letter-spacing:1px">TU TURNO ES</div>
+    <div id="num-txt" class="numero-grande">#0</div>
+  </div>
+  
+  <div id="estado-pantalla" class="estado-box" style="display:none">Cargando...</div>
 </div>
+
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.15.0/firebase-app.js";
-import { getDatabase, ref, onValue, off, set, get } from "https://www.gstatic.com/firebasejs/12.15.0/firebase-database.js";
+import { getDatabase, ref, onValue, off, get } from "https://www.gstatic.com/firebasejs/12.15.0/firebase-database.js";
 import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/12.15.0/firebase-auth.js";
 import { initializeAppCheck, ReCaptchaV3Provider } from "https://www.gstatic.com/firebasejs/12.15.0/firebase-app-check.js";
 
@@ -58,10 +70,9 @@ const app = initializeApp(firebaseConfig);
 const appCheck = initializeAppCheck(app, { provider: new ReCaptchaV3Provider('6LcPPFEtAAAAAIVtKgVFo1jtAQWRESDHHnCjMKaE'), isTokenAutoRefreshEnabled: true });
 const db=getDatabase(app); const auth=getAuth(app);
 const RUTA_BASE='pizzas_1';
-const KEY_BLOQUEO='pizzas_1_ticket_bloqueado'; const KEY_FECHA='pizzas_1_fecha'; const PARAM_ACRILICO='local';
+const KEY_BLOQUEO='pizzas_1_ticket_manual';
 let pedidoRefActual=null, audioCtx=null, intervaloAlarma=null;
 
-function limpiarURL(){ const url=new URL(location.href); url.searchParams.delete(PARAM_ACRILICO); history.replaceState(null,'', url.pathname+url.search); }
 function sonarFuerte(){
   try{
     if(!audioCtx) audioCtx=new (window.AudioContext||window.webkitAudioContext)();
@@ -73,82 +84,72 @@ function sonarFuerte(){
     if("vibrate" in navigator) navigator.vibrate([800,200,800]);
   }catch(e){}
 }
-function escucharPedido(ticketId){
-  if(pedidoRefActual) off(pedidoRefActual);
-  pedidoRefActual=ref(db, `${RUTA_BASE}/pedidos/${ticketId}`);
-  onValue(pedidoRefActual, (snap)=>{
-    const data=snap.val(); const titulo=document.getElementById("titulo"); const estadoEl=document.getElementById("estado-pantalla");
-    const numView=document.getElementById("numero-view"); const numTxt=document.getElementById("num-txt");
-    numView.style.display="block"; numTxt.innerText="#"+ticketId;
-    if(!data){ titulo.innerText="Turno finalizado"; estadoEl.innerHTML=`Pedido #${ticketId} entregado<br><small>Escanea QR de nuevo</small>`; return; }
-    if(data.estado==="ESPERA"){ titulo.innerText="Pedido en preparación"; estadoEl.innerHTML=`⏳ Pedido #${ticketId} en cocina<br><small>Te avisamos con sonido</small>`; }
-    if(data.estado==="LISTO"){ titulo.innerHTML="¡PEDIDO LISTO!"; estadoEl.innerHTML=`<h2 style='font-family:Fredoka;color:#E63946'>¡#${ticketId} LISTO!</h2>Retira en mostrador`; sonarFuerte(); let c=0; if(intervaloAlarma) clearInterval(intervaloAlarma); intervaloAlarma=setInterval(()=>{ if(audioCtx&&audioCtx.state==='suspended') audioCtx.resume(); sonarFuerte(); c++; document.body.style.background=(c%2===0)?"#ff0000":"#FFF8F0"; if(c>30){clearInterval(intervaloAlarma); document.body.style.background="";} },1500); }
-  });
-}
-async function generarTurnoNuevo(){
-  try{
-    try{ audioCtx=new (window.AudioContext||window.webkitAudioContext)(); await audioCtx.resume(); }catch(e){}
-    const contadorRef=ref(db, `${RUTA_BASE}/contador`);
-    
-    let snap = await get(contadorRef); 
-    let actual = snap.val(); 
-    if(actual === null || isNaN(actual)) {
-      actual = 0;
-    } else {
-      actual = Number(actual);
-    }
-    
-    let nuevoNumero = actual + 1; 
-    await set(contadorRef, nuevoNumero);
-    
-    const hoy=new Date().toDateString(); 
-    localStorage.setItem(KEY_BLOQUEO, nuevoNumero); 
-    localStorage.setItem(KEY_FECHA, hoy);
-    
-    await set(ref(db, `${RUTA_BASE}/pedidos/${nuevoNumero}`), { estado:"ESPERA", timestamp:Date.now() });
-    limpiarURL(); 
-    escucharPedido(nuevoNumero);
-  }catch(err){ 
-    console.error(err); 
-    document.getElementById("titulo").innerText="Error de Conexión"; 
-    document.getElementById("estado-pantalla").innerHTML=`<div style='color:red; font-size:13px; padding:10px;'>${err.message}<br><small>Código: ${err.code || 'Desconocido'}</small></div>`; 
-  }
-}
-signInAnonymously(auth).then(async()=>{
-  const params=new URLSearchParams(location.search); const vieneDeAcrilico=params.get(PARAM_ACRILICO)===RUTA_BASE;
-  const ticketGuardado=localStorage.getItem(KEY_BLOQUEO); const fechaGuardada=localStorage.getItem(KEY_FECHA); const hoy=new Date().toDateString();
-  
-  if(ticketGuardado&&fechaGuardada!==hoy&&!vieneDeAcrilico){ localStorage.removeItem(KEY_BLOQUEO); localStorage.removeItem(KEY_FECHA); }
-  
-  const estadoEl=document.getElementById("estado-pantalla"); const titulo=document.getElementById("titulo");
-  
-  if(vieneDeAcrilico){ 
-    titulo.innerText="Asignando tu turno..."; 
-    estadoEl.innerText="Generando número..."; 
-    await generarTurnoNuevo(); 
-    return; 
-  } else {
-    const ticketActual=localStorage.getItem(KEY_BLOQUEO);
-    if(ticketActual){ 
-      limpiarURL(); 
-      
-      const ticketRef = ref(db, `${RUTA_BASE}/pedidos/${ticketActual}`);
-      const snapTicket = await get(ticketRef);
-      
-      if(snapTicket.exists()){
-        escucharPedido(ticketActual); 
-        return;
-      } else {
-        localStorage.removeItem(KEY_BLOQUEO);
-        localStorage.removeItem(KEY_FECHA);
-        document.getElementById("contenedor-principal").innerHTML=`<div style='text-align:center;padding:30px'><div style='font-size:50px'>✅</div><h2 style='font-family:Fredoka'>Tu turno ya fue entregado</h2><p>Escanea nuevamente el QR del acrílico si deseas hacer otro pedido.</p></div>`;
-        return;
-      }
 
-    } else { 
-      document.getElementById("contenedor-principal").innerHTML=`<div style='text-align:center;padding:30px'><div style='font-size:50px'>⛔</div><h2 style='font-family:Fredoka'>Acceso bloqueado</h2><p>Escanea el QR del acrílico en caja</p><div style='margin-top:20px;background:#F1F5F9;padding:12px;border-radius:12px;font-size:12px'>?local=pizzas_1</div></div>`; 
+window.vincularTurnoManual = async function() {
+  const val = document.getElementById("input-turno").value.trim();
+  if(!val || isNaN(val)) {
+    alert("Por favor ingresa un número de turno válido.");
+    return;
+  }
+  
+  const ticketId = Number(val);
+  const ticketRef = ref(db, `${RUTA_BASE}/pedidos/${ticketId}`);
+  const snap = await get(ticketRef);
+  
+  if(!snap.exists()) {
+    alert("El turno #" + ticketId + " no existe o ya fue finalizado en cocina.");
+    return;
+  }
+  
+  localStorage.setItem(KEY_BLOQUEO, ticketId);
+  iniciarEscucha(ticketId);
+}
+
+function iniciarEscucha(ticketId){
+  document.getElementById("vista-ingreso").style.display = "none";
+  document.getElementById("numero-view").style.display = "block";
+  document.getElementById("estado-pantalla").style.display = "flex";
+  document.getElementById("num-txt").innerText = "#" + ticketId;
+  document.getElementById("titulo").innerText = "Estado de tu Pedido";
+
+  if(pedidoRefActual) off(pedidoRefActual);
+  pedidoRefActual = ref(db, `${RUTA_BASE}/pedidos/${ticketId}`);
+  
+  onValue(pedidoRefActual, (snap)=>{
+    const data = snap.val(); 
+    const estadoEl = document.getElementById("estado-pantalla");
+    const titulo = document.getElementById("titulo");
+    
+    if(!data){ 
+      titulo.innerText = "Turno finalizado"; 
+      estadoEl.innerHTML = `Pedido #${ticketId} entregado<br><small>Vuelve a ingresar un turno si es necesario</small>`; 
       return; 
     }
+    if(data.estado==="ESPERA"){ 
+      titulo.innerText = "Pedido en preparación"; 
+      estadoEl.innerHTML = `⏳ Pedido #${ticketId} en cocina<br><small>Te avisaremos con sonido</small>`; 
+    }
+    if(data.estado==="LISTO"){ 
+      titulo.innerHTML = "¡PEDIDO LISTO!"; 
+      estadoEl.innerHTML = `<h2 style='font-family:Fredoka;color:#E63946;margin:0'>¡#${ticketId} LISTO!</h2>Retira en mostrador`; 
+      sonarFuerte(); 
+      let c=0; 
+      if(intervaloAlarma) clearInterval(intervaloAlarma); 
+      intervaloAlarma=setInterval(()=>{ 
+        if(audioCtx&&audioCtx.state==='suspended') audioCtx.resume(); 
+        sonarFuerte(); 
+        c++; 
+        document.body.style.background=(c%2===0)?"#ff0000":"#FFF8F0"; 
+        if(c>30){clearInterval(intervaloAlarma); document.body.style.background="";} 
+      },1500); 
+    }
+  });
+}
+
+signInAnonymously(auth).then(()=>{
+  const ticketGuardado = localStorage.getItem(KEY_BLOQUEO);
+  if(ticketGuardado){
+    iniciarEscucha(ticketGuardado);
   }
 });
 </script>
