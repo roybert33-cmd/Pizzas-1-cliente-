@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Tótem - Pizzas 1</title>
+<title>Tótem Seguro - Pizzas 1</title>
 <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@600;700&family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
 <script>self.FIREBASE_APPCHECK_DEBUG_TOKEN="9D75EF79-110D-451F-9C5E-A1525245B583";</script>
 <style>
@@ -14,17 +14,18 @@
   h1{font-family:'Fredoka';font-size:26px;color:var(--azul);margin:6px 0 12px;line-height:1.1}
   .numero-grande{font-family:'Fredoka';font-size:72px;color:var(--azul);line-height:1;margin:10px 0}
   .estado-box{font-weight:700;color:var(--azul);background:#F1F5F9;padding:14px;border-radius:14px;min-height:50px;display:flex;flex-direction:column;align-items:center;justify-content:center;margin-top:14px;gap:4px}
+  .btn-alerta{background:var(--rojo);color:white;border:none;padding:14px 20px;border-radius:12px;font-weight:800;font-size:15px;cursor:pointer;margin-top:14px;width:100%}
 </style>
 </head>
 <body>
 <div class="contenedor" id="contenedor-principal">
   <div class="brand">PIZZAS <span>1</span> • RETIRO</div>
-  <h1 id="titulo">Generando tu turno...</h1>
+  <h1 id="titulo">Verificando acceso...</h1>
   <div id="numero-view" style="display:none">
     <div style="color:#888;font-size:12px;letter-spacing:1px">TU TURNO ES</div>
     <div id="num-txt" class="numero-grande">#0</div>
   </div>
-  <div id="estado-pantalla" class="estado-box">Conectando con el sistema...</div>
+  <div id="estado-pantalla" class="estado-box">Validando seguridad del tótem...</div>
 </div>
 
 <script type="module">
@@ -38,8 +39,7 @@ const app = initializeApp(firebaseConfig);
 const appCheck = initializeAppCheck(app, { provider: new ReCaptchaV3Provider('6LcPPFEtAAAAAIVtKgVFo1jtAQWRESDHHnCjMKaE'), isTokenAutoRefreshEnabled: true });
 const db = getDatabase(app); const auth = getAuth(app);
 const RUTA_BASE = 'pizzas_1';
-const KEY_BLOQUEO = 'pizzas_1_ticket_auto'; 
-const KEY_FECHA = 'pizzas_1_fecha_auto'; 
+const KEY_BLOQUEO = 'pizzas_1_ticket_seguro'; 
 let pedidoRefActual = null, audioCtx = null, intervaloAlarma = null;
 
 function sonarFuerte(){
@@ -52,6 +52,14 @@ function sonarFuerte(){
     osc.connect(gain); gain.connect(audioCtx.destination); osc.start(); osc.stop(audioCtx.currentTime+0.8);
     if("vibrate" in navigator) navigator.vibrate([800,200,800]);
   }catch(e){}
+}
+
+function bloquearPorAccesoDirecto(){
+  document.getElementById("titulo").innerText = "Acceso Denegado";
+  document.getElementById("estado-pantalla").innerHTML = `
+    <div style="color:var(--rojo);font-size:14px;margin-bottom:6px">⚠️ No puedes acceder recargando la página ni desde el historial.</div>
+    <small style="color:#555">Debes escanear el código QR oficial en el local para obtener un turno.</small>
+  `;
 }
 
 function escucharPedido(ticketId){
@@ -68,12 +76,13 @@ function escucharPedido(ticketId){
     
     if(!data){ 
       titulo.innerText = "Turno finalizado"; 
-      estadoEl.innerHTML = `Pedido #${ticketId} entregado<br><small>Vuelve a escanear el QR si necesitas otro pedido</small>`; 
+      estadoEl.innerHTML = `Pedido #${ticketId} entregado o cerrado.<br><small>Escanea nuevamente el QR si deseas hacer otro pedido.</small>`; 
+      localStorage.removeItem(KEY_BLOQUEO);
       return; 
     }
     if(data.estado==="ESPERA"){ 
       titulo.innerText = "Pedido en preparación"; 
-      estadoEl.innerHTML = `⏳ Pedido #${ticketId} en cocina<br><small>Te avisaremos cuando esté listo</small>`; 
+      estadoEl.innerHTML = `⏳ Pedido #${ticketId} en cocina<br><small>Mantén esta pantalla abierta para recibir el aviso</small>`; 
     }
     if(data.estado==="LISTO"){ 
       titulo.innerHTML = "¡PEDIDO LISTO!"; 
@@ -92,7 +101,30 @@ function escucharPedido(ticketId){
   });
 }
 
-async function obtenerYAsignarTurnoAutomatico(){
+signInAnonymously(auth).then(async ()=>{
+  const urlParams = new URLSearchParams(window.location.search);
+  const escanearToken = urlParams.get('qr'); // El QR debe apuntar a la URL con ?qr=nuevo
+  
+  const turnoGuardadoLocal = localStorage.getItem(KEY_BLOQUEO);
+
+  // CASO 1: El usuario tiene un turno guardado en este navegador y solo está viendo su estado actual
+  if(turnoGuardadoLocal){
+    const snap = await get(ref(db, `${RUTA_BASE}/pedidos/${turnoGuardadoLocal}`));
+    if(snap.exists()){
+      escucharPedido(turnoGuardadoLocal);
+      return;
+    } else {
+      localStorage.removeItem(KEY_BLOQUEO);
+    }
+  }
+
+  // CASO 2: Intenta entrar sin escanear el QR (ej. recargando con F5 o escribiendo la URL directa)
+  if(!escanearToken){
+    bloquearPorAccesoDirecto();
+    return;
+  }
+
+  // CASO 3: Escaneó el QR correctamente -> Generamos el turno único de forma atómica
   const contadorRef = ref(db, `${RUTA_BASE}/contador`);
   try {
     let nuevoNumero = 0;
@@ -102,45 +134,20 @@ async function obtenerYAsignarTurnoAutomatico(){
       return nuevoNumero;
     });
 
-    const hoy = new Date().toDateString();
     localStorage.setItem(KEY_BLOQUEO, nuevoNumero);
-    localStorage.setItem(KEY_FECHA, hoy);
 
     await set(ref(db, `${RUTA_BASE}/pedidos/${nuevoNumero}`), {
       estado: "ESPERA",
       timestamp: Date.now()
     });
 
+    // Limpiamos la URL por seguridad para que no recarguen con el mismo parámetro QR
+    window.history.replaceState({}, document.title, window.location.pathname);
+
     escucharPedido(nuevoNumero);
   } catch(err) {
-    console.error(err);
     document.getElementById("titulo").innerText = "Error al generar turno";
-    document.getElementById("estado-pantalla").innerHTML = `<div style='color:red; font-size:13px;'>${err.message}</div>`;
-  }
-}
-
-signInAnonymously(auth).then(async ()=>{
-  const ticketGuardado = localStorage.getItem(KEY_BLOQUEO);
-  const fechaGuardada = localStorage.getItem(KEY_FECHA);
-  const hoy = new Date().toDateString();
-
-  if(ticketGuardado && fechaGuardada !== hoy){
-    localStorage.removeItem(KEY_BLOQUEO);
-    localStorage.removeItem(KEY_FECHA);
-  }
-
-  const turnoExistente = localStorage.getItem(KEY_BLOQUEO);
-
-  if(turnoExistente){
-    const snap = await get(ref(db, `${RUTA_BASE}/pedidos/${turnoExistente}`));
-    if(snap.exists()){
-      escucharPedido(turnoExistente);
-    } else {
-      localStorage.removeItem(KEY_BLOQUEO);
-      await obtenerYAsignarTurnoAutomatico();
-    }
-  } else {
-    await obtenerYAsignarTurnoAutomatico();
+    document.getElementById("estado-pantalla").innerHTML = `<div style='color:red;'>${err.message}</div>`;
   }
 });
 </script>
