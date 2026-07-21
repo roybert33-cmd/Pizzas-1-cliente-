@@ -35,7 +35,6 @@
   h1{font-family:'Fredoka';font-size:26px;color:var(--azul);margin:6px 0 12px;line-height:1.1}
   .numero-grande{font-family:'Fredoka';font-size:72px;color:var(--azul);line-height:1;margin:10px 0}
   .estado-box{font-weight:700;color:var(--azul);background:#F1F5F9;padding:14px;border-radius:14px;min-height:50px;display:flex;flex-direction:column;align-items:center;justify-content:center;margin-top:14px;gap:4px}
-  .video-cueca{width:100%;border-radius:16px;margin-top:16px;max-height:280px;object-fit:cover}
   .btn{width:100%;padding:16px;border:none;border-radius:14px;font-weight:800;font-size:16px;cursor:pointer;margin-top:12px}
   .btn-azul{background:var(--azul);color:white}
 </style>
@@ -100,13 +99,39 @@ async function generarTurnoNuevo(){
 signInAnonymously(auth).then(async()=>{
   const params=new URLSearchParams(location.search); const vieneDeAcrilico=params.get(PARAM_ACRILICO)===RUTA_BASE;
   const ticketGuardado=localStorage.getItem(KEY_BLOQUEO); const fechaGuardada=localStorage.getItem(KEY_FECHA); const hoy=new Date().toDateString();
+  
   if(ticketGuardado&&fechaGuardada!==hoy&&!vieneDeAcrilico){ localStorage.removeItem(KEY_BLOQUEO); localStorage.removeItem(KEY_FECHA); }
+  
   const estadoEl=document.getElementById("estado-pantalla"); const titulo=document.getElementById("titulo");
-  if(vieneDeAcrilico){ titulo.innerText="Asignando tu turno..."; estadoEl.innerText="Generando número..."; await generarTurnoNuevo(); return; }
-  else {
+  
+  if(vieneDeAcrilico){ 
+    titulo.innerText="Asignando tu turno..."; 
+    estadoEl.innerText="Generando número..."; 
+    await generarTurnoNuevo(); 
+    return; 
+  } else {
     const ticketActual=localStorage.getItem(KEY_BLOQUEO);
-    if(ticketActual){ limpiarURL(); escucharPedido(ticketActual); return; }
-    else { document.getElementById("contenedor-principal").innerHTML=`<div style='text-align:center;padding:30px'><div style='font-size:50px'>⛔</div><h2 style='font-family:Fredoka'>Acceso bloqueado</h2><p>Escanea el QR del acrílico en caja</p><div style='margin-top:20px;background:#F1F5F9;padding:12px;border-radius:12px;font-size:12px'>?local=pizzas_1</div></div>`; return; }
+    if(ticketActual){ 
+      limpiarURL(); 
+      
+      // Validación segura: comprobar si el ticket sigue activo en Firebase
+      const ticketRef = ref(db, `${RUTA_BASE}/pedidos/${ticketActual}`);
+      const snapTicket = await get(ticketRef);
+      
+      if(snapTicket.exists()){
+        escucharPedido(ticketActual); 
+        return;
+      } else {
+        localStorage.removeItem(KEY_BLOQUEO);
+        localStorage.removeItem(KEY_FECHA);
+        document.getElementById("contenedor-principal").innerHTML=`<div style='text-align:center;padding:30px'><div style='font-size:50px'>✅</div><h2 style='font-family:Fredoka'>Tu turno ya fue entregado</h2><p>Escanea nuevamente el QR del acrílico si deseas hacer otro pedido.</p></div>`;
+        return;
+      }
+
+    } else { 
+      document.getElementById("contenedor-principal").innerHTML=`<div style='text-align:center;padding:30px'><div style='font-size:50px'>⛔</div><h2 style='font-family:Fredoka'>Acceso bloqueado</h2><p>Escanea el QR del acrílico en caja</p><div style='margin-top:20px;background:#F1F5F9;padding:12px;border-radius:12px;font-size:12px'>?local=pizzas_1</div></div>`; 
+      return; 
+    }
   }
 });
 </script>
