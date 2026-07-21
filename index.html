@@ -89,12 +89,30 @@ async function generarTurnoNuevo(){
   try{
     try{ audioCtx=new (window.AudioContext||window.webkitAudioContext)(); await audioCtx.resume(); }catch(e){}
     const contadorRef=ref(db, `${RUTA_BASE}/contador`);
-    let snap = await get(contadorRef); let actual=snap.val(); if(actual===null||isNaN(actual)) actual=0;
-    let nuevoNumero=actual+1; await set(contadorRef, nuevoNumero);
-    const hoy=new Date().toDateString(); localStorage.setItem(KEY_BLOQUEO, nuevoNumero); localStorage.setItem(KEY_FECHA, hoy);
+    
+    let snap = await get(contadorRef); 
+    let actual = snap.val(); 
+    if(actual === null || isNaN(actual)) {
+      actual = 0;
+    } else {
+      actual = Number(actual);
+    }
+    
+    let nuevoNumero = actual + 1; 
+    await set(contadorRef, nuevoNumero);
+    
+    const hoy=new Date().toDateString(); 
+    localStorage.setItem(KEY_BLOQUEO, nuevoNumero); 
+    localStorage.setItem(KEY_FECHA, hoy);
+    
     await set(ref(db, `${RUTA_BASE}/pedidos/${nuevoNumero}`), { estado:"ESPERA", timestamp:Date.now() });
-    limpiarURL(); escucharPedido(nuevoNumero);
-  }catch(err){ console.error(err); document.getElementById("titulo").innerText="Error"; document.getElementById("error-box").innerHTML=`<div style='color:red'>${err.message} - ${err.code}</div>`; }
+    limpiarURL(); 
+    escucharPedido(nuevoNumero);
+  }catch(err){ 
+    console.error(err); 
+    document.getElementById("titulo").innerText="Error de Conexión"; 
+    document.getElementById("estado-pantalla").innerHTML=`<div style='color:red; font-size:13px; padding:10px;'>${err.message}<br><small>Código: ${err.code || 'Desconocido'}</small></div>`; 
+  }
 }
 signInAnonymously(auth).then(async()=>{
   const params=new URLSearchParams(location.search); const vieneDeAcrilico=params.get(PARAM_ACRILICO)===RUTA_BASE;
@@ -114,7 +132,6 @@ signInAnonymously(auth).then(async()=>{
     if(ticketActual){ 
       limpiarURL(); 
       
-      // Validación segura: comprobar si el ticket sigue activo en Firebase
       const ticketRef = ref(db, `${RUTA_BASE}/pedidos/${ticketActual}`);
       const snapTicket = await get(ticketRef);
       
